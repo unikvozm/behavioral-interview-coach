@@ -506,3 +506,49 @@ button {
     grid-template-columns: 90px 1fr 40px;
   }
 }
+
+.recording-done {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.recording-done-label {
+  color: var(--teal);
+  font-weight: 600;
+}
+
+.mic-note {
+  color: var(--muted);
+  font-size: 0.82rem;
+  margin-top: 12px;
+}
+
+.transcript-review {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper-raised);
+}
+
+.transcript-review h3 {
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+.transcript-review p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.delivery-stats {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 18px;
+}

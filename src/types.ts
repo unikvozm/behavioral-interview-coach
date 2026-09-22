@@ -13,13 +13,22 @@ export interface StarScores {
   communication: number;
 }
 
+export interface DeliveryStats {
+  durationSeconds: number;
+  wordCount: number;
+  wordsPerMinute: number;
+  fillerWordCount: number;
+}
+
 export interface Feedback {
+  transcript: string; // the transcript the score is actually based on (from Whisper, or typed)
   overall: number; // 0-5
   scores: StarScores;
   strengths: string[];
   improvements: string[];
   summary: string;
   rewrittenExample?: string;
+  delivery?: DeliveryStats;
 }
 
 export interface StoredScore {

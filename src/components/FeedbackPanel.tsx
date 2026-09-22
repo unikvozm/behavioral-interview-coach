@@ -27,6 +27,14 @@ export default function FeedbackPanel({ feedback }: { feedback: Feedback }) {
         <p className="feedback-summary">{feedback.summary}</p>
       </div>
 
+      {feedback.delivery && (
+        <div className="delivery-stats">
+          <span>{feedback.delivery.durationSeconds}s spoken</span>
+          <span>{feedback.delivery.wordsPerMinute} words/min</span>
+          <span>{feedback.delivery.fillerWordCount} filler words</span>
+        </div>
+      )}
+
       <div className="star-grid">
         {STAR_LABELS.map(({ key, label }) => {
           const value = feedback.scores[key];

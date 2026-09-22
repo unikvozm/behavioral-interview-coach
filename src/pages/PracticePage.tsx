@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { questions } from "../data/questions";
-import MicRecorder from "../components/MicRecorder";
+import MicRecorder, { type RecordingResult } from "../components/MicRecorder";
 import FeedbackPanel from "../components/FeedbackPanel";
-import { requestFeedback, FeedbackApiError } from "../utils/api";
+import { requestFeedbackFromAudio, requestFeedbackFromText, FeedbackApiError } from "../utils/api";
 import { downloadFeedbackPdf } from "../utils/pdf";
 import { saveScore } from "../utils/scores";
 import type { Feedback } from "../types";
@@ -14,7 +14,8 @@ export default function PracticePage() {
 
   // Deliberately plain component state: nothing here is written to localStorage,
   // sessionStorage, or a server. A refresh or navigation wipes it, as required.
-  const [transcript, setTranscript] = useState("");
+  const [recording, setRecording] = useState<RecordingResult | null>(null);
+  const [fallbackText, setFallbackText] = useState("");
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,15 +31,22 @@ export default function PracticePage() {
 
   async function handleEstimate() {
     if (!question) return;
-    if (transcript.trim().length < 10) {
-      setError("Record or type a longer answer before requesting feedback.");
+    if (!recording && fallbackText.trim().length < 10) {
+      setError("Record an answer, or type at least a sentence, before requesting feedback.");
       return;
     }
     setIsLoading(true);
     setError(null);
     setFeedback(null);
     try {
-      const result = await requestFeedback({ questionText: question.text, transcript });
+      const result = recording
+        ? await requestFeedbackFromAudio({
+            questionText: question.text,
+            audioBlob: recording.blob,
+            mimeType: recording.mimeType,
+            durationSeconds: recording.durationSeconds,
+          })
+        : await requestFeedbackFromText({ questionText: question.text, transcript: fallbackText });
       setFeedback(result);
       saveScore(question.id, result.overall);
     } catch (err) {
@@ -53,7 +61,8 @@ export default function PracticePage() {
   }
 
   function handleReset() {
-    setTranscript("");
+    setRecording(null);
+    setFallbackText("");
     setFeedback(null);
     setError(null);
   }
@@ -78,11 +87,16 @@ export default function PracticePage() {
         impact).
       </section>
 
-      <MicRecorder transcript={transcript} onTranscriptChange={setTranscript} disabled={isLoading} />
+      <MicRecorder
+        onRecordingChange={setRecording}
+        disabled={isLoading}
+        fallbackText={fallbackText}
+        onFallbackTextChange={setFallbackText}
+      />
 
       <div className="actions-row">
         <button className="primary-button" onClick={handleEstimate} disabled={isLoading}>
-          {isLoading ? "Analyzing…" : "Estimate"}
+          {isLoading ? "Transcribing & analyzing…" : "Estimate"}
         </button>
         <button className="ghost-button" onClick={handleReset} disabled={isLoading}>
           Clear
@@ -90,7 +104,9 @@ export default function PracticePage() {
         {feedback && (
           <button
             className="ghost-button"
-            onClick={() => downloadFeedbackPdf({ questionText: question.text, transcript, feedback })}
+            onClick={() =>
+              downloadFeedbackPdf({ questionText: question.text, transcript: feedback.transcript, feedback })
+            }
           >
             Download PDF
           </button>
@@ -99,12 +115,20 @@ export default function PracticePage() {
 
       {error && <p className="error-text">{error}</p>}
 
-      {feedback && <FeedbackPanel feedback={feedback} />}
+      {feedback && (
+        <>
+          <div className="transcript-review">
+            <h3>What we heard</h3>
+            <p>{feedback.transcript}</p>
+          </div>
+          <FeedbackPanel feedback={feedback} />
+        </>
+      )}
 
       <p className="privacy-note">
         Nothing on this page is saved except your latest score (a single number) for this
-        question, stored only in your browser. Refreshing or leaving this page clears your
-        recording, transcript, and feedback.
+        question, stored only in your browser. Your recording is transcribed on the server and
+        discarded immediately — refreshing or leaving this page clears everything else.
       </p>
     </div>
   );

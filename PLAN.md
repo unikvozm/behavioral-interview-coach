@@ -41,21 +41,48 @@ folder deployable anywhere for free, and it doesn't need SSR because there's
 no content that benefits from being pre-rendered (the question bank is small
 and public; nothing here needs to rank in search engines).
 
-### 2.2 Speech-to-text: **Web Speech API (`SpeechRecognition`)**
+### 2.2 Speech-to-text: **`MediaRecorder` + Groq Whisper (server-side), not the browser's live `SpeechRecognition`**
+
+An earlier version of this plan used the browser's built-in
+`SpeechRecognition` API for free, zero-latency live captions. In practice it
+turned out to be unreliable: when the API isn't confident about a stretch of
+speech, it silently *drops* it rather than transcribing it imperfectly — so
+normal pauses, a quieter word, or background noise can wipe out large chunks
+of an answer with no visible error. That's a structural limitation of the
+API, not something fixable with better event handling.
 
 | Option | Pros | Cons |
 |---|---|---|
-| **Web Speech API (chosen)** | 100% free, zero API cost, zero latency to a server, works entirely client-side, live/streaming transcript | Chromium-only (Chrome, Edge, Brave, Opera) — no Safari/Firefox support; accuracy is "good enough," not state-of-the-art; requires internet (Chrome's implementation calls Google's servers under the hood, but you as the developer never see a bill) |
-| OpenAI Whisper API | Very high accuracy, language-agnostic | Costs money per minute — conflicts with the "fully free" requirement; adds server round-trip and requires recording+uploading audio, which also complicates "don't store the recording" |
-| `whisper.cpp` / `transformers.js` running Whisper in-browser via WASM | Free, fully offline, no data leaves the browser | Multi-hundred-MB model download on first load, slow on a typical laptop, much bigger engineering lift for an MVP |
-| MediaRecorder + record audio, transcribe later | Lets user review/replay audio before transcribing | We explicitly must NOT persist audio, and storing raw audio in memory just to transcribe it is unnecessary extra complexity when live streaming transcription already exists for free |
+| **`MediaRecorder` (record real audio) → Groq Whisper API (chosen)** | Whisper-quality transcription (far higher accuracy, doesn't silently drop words), `MediaRecorder` is supported in every modern browser (Chrome, Firefox, Safari, Edge) not just Chromium, and Groq's Whisper endpoint is on the same free tier as the LLM call | Adds one extra network round-trip (record → upload → transcribe) before feedback can start; requires microphone permission the same as before |
+| Browser `SpeechRecognition` (previous approach) | Zero network round-trip for transcription, works while speaking (live captions) | Chromium-only; silently drops low-confidence words/phrases, which is exactly the bug reported — not appropriate as the *authoritative* transcript for scoring |
+| OpenAI Whisper API directly | Very high accuracy | No free tier — conflicts with "fully free"; Groq hosts the same Whisper model for free |
+| `whisper.cpp` / `transformers.js` running Whisper in-browser via WASM | Free, fully offline, no audio leaves the browser at all | Multi-hundred-MB model download on first load, slow on a typical laptop — too heavy for an MVP |
 
-**Why Web Speech API wins here:** it directly produces text while the user
-talks, with a native start/stop mic button, at zero cost and zero backend
-complexity, which matches both the "fully free" and "nothing is stored"
-requirements perfectly. The real trade-off is browser support — the app
-detects support and falls back to a plain textarea (type your answer) on
-unsupported browsers, so the feature degrades gracefully instead of breaking.
+**Why this wins now:** record with `MediaRecorder` (broadly supported,
+simple start/stop, no live-captioning promises to break), send the finished
+clip to a serverless function, which forwards it to **Groq's hosted
+`whisper-large-v3-turbo`** and gets back an accurate transcript — still
+entirely on Groq's free tier (see §2.3), still with the audio discarded the
+moment transcription finishes. The trade-off versus the old approach is a
+short "Transcribing & analyzing…" wait instead of watching words appear
+live, in exchange for actually getting what you said.
+
+**On "should we analyze the raw audio for vocal delivery instead of just the
+transcript?"** — worth calling out explicitly, since it's a reasonable
+instinct. Groq's chat models are text-only; they cannot reason over an audio
+file directly, only Whisper can turn it into text. So this app computes
+objective delivery stats *programmatically* from the transcript + recording
+duration — words-per-minute and a filler-word count (um/uh/like/etc.) — and
+feeds those numbers to the LLM alongside the transcript, so feedback can
+speak to pacing without the model fabricating claims about tone or
+confidence it can't actually perceive. If you want genuine acoustic analysis
+(hesitation sounds, vocal confidence, tone), that needs a multimodal model
+that accepts raw audio for reasoning — e.g. Google Gemini's `generateContent`
+with an audio part, which does have a real free tier. That's a bigger swap
+(different provider, different request/response shape, and the "cannot
+verify what a model 'hears' in a voice" caveat gets more important to state
+to users) so it's left as a documented extension rather than the MVP
+default.
 
 ### 2.3 AI feedback: **LLM via a serverless proxy, Groq's free tier by default**
 
@@ -72,6 +99,17 @@ good-quality, fast structured feedback. Because the proxy function
 (`api/feedback.ts`) talks to Groq using the OpenAI-compatible
 `/chat/completions` shape, swapping providers later is a small, contained
 change — see "Swapping the LLM provider" below.
+
+**A note on model IDs:** Groq's free/developer-tier model lineup changes
+over time — models get deprecated or moved to Enterprise-only access (this
+already happened once between writing this plan and testing it: an earlier
+draft used `llama-3.3-70b-versatile`, which Groq has since moved to
+Enterprise-only). The code currently targets `openai/gpt-oss-120b` for chat
+and `whisper-large-v3-turbo` for transcription — both confirmed free/
+developer-tier as of this writing — but if you ever see a `model_not_found`
+error, check the current list at
+[console.groq.com/docs/models](https://console.groq.com/docs/models) and
+update the two constants at the top of `api/feedback.ts`.
 
 **Why a serverless proxy instead of calling the LLM directly from the
 browser:** calling Groq directly from client-side JS would require shipping
